@@ -24,27 +24,35 @@ export default function HomePage() {
   if (!loading && !session) return null;
 
   return (
-    <main className="min-h-screen p-6">
-      <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">War Room Companion</h1>
-        <button className="rounded-xl border px-4 py-2" onClick={signOut}>
-          Sign out
-        </button>
-      </header>
+    <main className="min-h-screen">
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-semibold">Menu</h1>
+          <button
+            className="rounded-xl border px-4 py-2 text-sm hover:bg-gray-50"
+            onClick={signOut}
+          >
+            Sign out
+          </button>
+        </div>
 
-      <section className="mt-8 grid gap-4 max-w-xl">
-        <Link className="rounded-2xl border p-5 hover:bg-gray-50" href="/create-game">
-          <div className="font-medium">🎲 Create a game</div>
-          <div className="text-sm text-gray-600">Host a new War Room session.</div>
-        </Link>
+        <div className="grid gap-4 max-w-xl">
+          <Link className="rounded-2xl border p-5 hover:bg-gray-50" href="/create-game">
+            <div className="font-medium">🎲 Create a game</div>
+            <div className="text-sm text-gray-600">Host a new War Room session.</div>
+          </Link>
 
-        <Link className="rounded-2xl border p-5 hover:bg-gray-50" href="/health">
-          <div className="font-medium">✅ Supabase health check</div>
-          <div className="text-sm text-gray-600">
-            Confirms you can read data as an authenticated user.
-          </div>
-        </Link>
-      </section>
+          <Link className="rounded-2xl border p-5 hover:bg-gray-50" href="/join-game">
+            <div className="font-medium">🔗 Join a game</div>
+            <div className="text-sm text-gray-600">Enter a Game ID shared by the host.</div>
+          </Link>
+
+          <Link className="rounded-2xl border p-5 hover:bg-gray-50" href="/health">
+            <div className="font-medium">✅ Health check</div>
+            <div className="text-sm text-gray-600">Verify auth + DB access.</div>
+          </Link>
+        </div>
+      </div>
     </main>
   );
 }

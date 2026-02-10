@@ -3,6 +3,10 @@ import { supabase } from "@/lib/supabase/client";
 /**
  * Creates a new game and registers the current user as the host player.
  * Returns the created game id.
+ *
+ * Important: We generate the UUID client-side to avoid needing
+ * .select() on the insert, because SELECT is blocked until the
+ * player row exists (RLS).
  */
 export async function createGame(params: {
   name: string;
@@ -15,24 +19,24 @@ export async function createGame(params: {
 
   const userId = authData.user.id;
 
-  // 1) Create game
-  const { data: gameRow, error: gameErr } = await supabase
-    .from("games")
-    .insert({
-      name: params.name.trim(),
-      scenario: params.scenario,
-      status: "LOBBY",
-      phase: "ECONOMY",
-      round: 1,
-    })
-    .select("id")
-    .single();
+  // Generate UUID on the client so we don't need INSERT ... RETURNING via SELECT
+  const gameId = crypto.randomUUID();
+
+  // 1) Create game (no .select())
+  const { error: gameErr } = await supabase.from("games").insert({
+    id: gameId,
+    name: params.name.trim(),
+    scenario: params.scenario,
+    status: "LOBBY",
+    phase: "ECONOMY",
+    round: 1,
+  });
 
   if (gameErr) throw new Error(gameErr.message);
 
   // 2) Create host player row
   const { error: playerErr } = await supabase.from("players").insert({
-    game_id: gameRow.id,
+    game_id: gameId,
     user_id: userId,
     display_name: params.displayName.trim(),
     is_host: true,
@@ -40,5 +44,5 @@ export async function createGame(params: {
 
   if (playerErr) throw new Error(playerErr.message);
 
-  return gameRow.id as string;
+  return gameId;
 }
