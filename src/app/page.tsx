@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase/client";
 import { useSession } from "@/lib/supabase/useSession";
@@ -9,17 +10,18 @@ export default function HomePage() {
   const router = useRouter();
   const { session, loading } = useSession();
 
+  useEffect(() => {
+    if (!loading && !session) {
+      router.replace("/sign-in");
+    }
+  }, [loading, session, router]);
+
   async function signOut() {
     await supabase.auth.signOut();
     router.replace("/sign-in");
   }
 
-  if (loading) return <div className="p-6">Loading…</div>;
-
-  if (!session) {
-    router.replace("/sign-in");
-    return null;
-  }
+  if (!loading && !session) return null;
 
   return (
     <main className="min-h-screen p-6">
@@ -42,10 +44,6 @@ export default function HomePage() {
             Confirms you can read data as an authenticated user.
           </div>
         </Link>
-
-        <div className="rounded-2xl border p-5 text-sm text-gray-600">
-          Next screens to build: Join Game, Lobby (players), Planning (O&P).
-        </div>
       </section>
     </main>
   );

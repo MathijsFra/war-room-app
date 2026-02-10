@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/supabase/useSession";
 import { createGame } from "@/lib/db/createGame";
@@ -23,10 +23,13 @@ export default function CreateGamePage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (!loading && !session) {
-    router.replace("/sign-in");
-    return null;
-  }
+  useEffect(() => {
+    if (!loading && !session) {
+      router.replace("/sign-in");
+    }
+  }, [loading, session, router]);
+
+  if (!loading && !session) return null;
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
