@@ -1,9 +1,5 @@
 import { supabase } from "@/lib/supabase/client";
 
-/**
- * Join an existing game as the current user.
- * Uses upsert for idempotency, and avoids returning a row.
- */
 export async function joinGame(params: { gameId: string; displayName: string }) {
   const gameId = params.gameId.trim();
   if (!gameId) throw new Error("Game ID is required");
@@ -14,21 +10,23 @@ export async function joinGame(params: { gameId: string; displayName: string }) 
 
   const userId = authData.user.id;
 
-  const { error } = await supabase.from("players").upsert(
-    {
-      game_id: gameId,
-      user_id: userId,
-      display_name: params.displayName.trim(),
-      is_host: false,
-    },
-    {
-      onConflict: "game_id,user_id",
-      // avoid returning representation (prevents SELECT/RLS edge cases)
-      returning: "minimal" as any,
-    }
-  );
+  const payload = {
+    game_id: gameId,
+    user_id: userId,
+    display_name: params.displayName.trim(),
+    is_host: false,
+  };
 
-  if (error) throw new Error(error.message);
+  const { error } = await supabase
+    .from("players")
+    .insert(payload, { returning: "minimal" as any });
+
+  if (error) {
+    // 23505 = unique_violation (already joined). Treat as success.
+    if ((error as any).code === "23505") return gameId;
+
+    throw new Error(error.message);
+  }
 
   return gameId;
 }
