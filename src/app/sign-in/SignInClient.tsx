@@ -1,86 +1,79 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { supabase } from "@/lib/supabase/client";
+import React, { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { supabase } from "@/lib/supabase/client";
 
-type Mode = "password" | "magic";
+function isSafeNextPath(nextPath: string | null): nextPath is string {
+  if (!nextPath) return false;
+  // Only allow internal relative paths to avoid open redirects.
+  return nextPath.startsWith("/") && !nextPath.startsWith("//");
+}
 
 export default function SignInClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const initialMode = useMemo<Mode>(() => {
-    const m = searchParams.get("mode");
-    return m === "magic" ? "magic" : "password";
-  }, [searchParams]);
-
-  const [mode, setMode] = useState<Mode>(initialMode);
-
-
   const nextParam = useMemo(() => {
-    const raw = searchParams.get("next");
-    if (!raw) return null;
-    try {
-      const decoded = decodeURIComponent(raw);
-      // basic open-redirect protection: only allow local paths
-      if (!decoded.startsWith("/") || decoded.startsWith("//")) return null;
-      return decoded;
-    } catch {
-      return null;
-    }
+    const n = searchParams.get("next");
+    return isSafeNextPath(n) ? n : null;
   }, [searchParams]);
 
-  // password form
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-
-  // magic link form
-  const [magicEmail, setMagicEmail] = useState("");
-
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
-  // Avoid double-redirects in dev and handle auth state reliably.
-  const redirectedRef = useRef(false);
+  function go(to: string) {
+    // Hard navigation is the most reliable after auth in production.
+    // It also ensures /resume loads fresh and reads the persisted session.
+    if (typeof window !== "undefined") window.location.assign(to);
+    else router.replace(to);
+  }
 
   useEffect(() => {
-    // 1) If we already have a session, go straight to the target page.
-    supabase.auth.getSession().then(({ data, error }) => {
-      if (error) {
-        setStatus(error.message);
-        return;
-      }
-      if (data.session && !redirectedRef.current) {
-        redirectedRef.current = true;
-        router.replace(nextParam ?? "/resume");
-      }
-    });
+    let unsub: { data: { subscription: { unsubscribe: () => void } } } | null =
+      null;
 
-    // 2) Also listen for SIGNED_IN events. This is more reliable than
-    // immediately redirecting after signInWithPassword, because the session
-    // persistence can complete asynchronously.
-    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
-      if ((event === "SIGNED_IN" || event === "TOKEN_REFRESHED") && session && !redirectedRef.current) {
-        redirectedRef.current = true;
-        router.replace(nextParam ?? "/resume");
+    (async () => {
+      // If the user is already signed in, send them onward.
+      const { data, error } = await supabase.auth.getSession();
+      if (!error && data.session) {
+        go(nextParam ?? "/resume");
+      }
+    })();
+
+    // Redirect as soon as Supabase confirms sign-in.
+    unsub = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+        go(nextParam ?? "/resume");
       }
     });
 
     return () => {
-      sub.subscription.unsubscribe();
+      try {
+        unsub?.data.subscription.unsubscribe();
+      } catch {
+        // ignore
+      }
     };
-  }, [router, nextParam]);
+  }, [nextParam]); // intentionally not depending on router/go to avoid re-subscribing loops
 
-  async function signInWithPassword(e: React.FormEvent) {
-  setStatus("Signing in…");
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setBusy(true);
     setStatus(null);
+    setBusy(true);
 
     try {
+      const trimmedEmail = email.trim();
+
+      if (!trimmedEmail || !password) {
+        setStatus("Please enter email and password.");
+        return;
+      }
+
       const { error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
+        email: trimmedEmail,
         password,
       });
 
@@ -89,175 +82,83 @@ export default function SignInClient() {
         return;
       }
 
-      // Redirect happens via onAuthStateChange above.
+      // Some production builds can be slow to emit the auth event;
+      // redirect immediately when sign-in succeeded.
+      go(nextParam ?? "/resume");
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Sign-in failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function signUpWithPassword() {
-    setBusy(true);
-    setStatus(null);
-
-    try {
-      const { error } = await supabase.auth.signUp({
-        email: email.trim(),
-        password,
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
-        },
-      });
-
-      if (error) {
-        setStatus(error.message);
-        return;
-      }
-
-      setStatus("Account created. If email confirmations are enabled, check your email to confirm.");
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Sign-up failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function sendMagicLink(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setStatus(null);
-
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email: magicEmail.trim(),
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
-        },
-      });
-
-      if (error) {
-        setStatus(error.message);
-        return;
-      }
-
-      setStatus("Check your email for the sign-in link.");
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Failed to send magic link");
+      setStatus(err instanceof Error ? err.message : "Sign-in failed.");
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center p-6">
-      <div className="w-full max-w-md rounded-2xl border p-6 shadow-sm">
-        <h1 className="text-2xl font-semibold">Sign in</h1>
-        <p className="mt-2 text-sm text-gray-600">
-          Use password login for development (no email rate limits). Magic links also supported.
-        </p>
+    <div className="mx-auto flex w-full max-w-md flex-col gap-4 p-6">
+      <h1 className="text-2xl font-semibold">Sign in</h1>
 
-        <div className="mt-6 flex gap-2">
-          <button
-            type="button"
-            onClick={() => setMode("password")}
-            className={`flex-1 rounded-xl border px-4 py-2 text-sm ${
-              mode === "password" ? "bg-gray-50 font-medium" : "hover:bg-gray-50"
-            }`}
-          >
-            Password
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("magic")}
-            className={`flex-1 rounded-xl border px-4 py-2 text-sm ${
-              mode === "magic" ? "bg-gray-50 font-medium" : "hover:bg-gray-50"
-            }`}
-          >
-            Magic link
-          </button>
+      {status ? (
+        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {status}
         </div>
+      ) : null}
 
-        {mode === "password" ? (
-          <div className="mt-6 space-y-4">
-            <form className="space-y-4" onSubmit={signInWithPassword}>
-              <div>
-                <label className="block text-sm font-medium">Email</label>
-                <input
-                  className="mt-1 w-full rounded-xl border p-3"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  type="email"
-                  autoComplete="email"
-                  placeholder="you@example.com"
-                  required
-                />
-              </div>
+      <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+        <label className="flex flex-col gap-1">
+          <span className="text-sm text-muted-foreground">Email</span>
+          <input
+            className="rounded-md border px-3 py-2"
+            type="email"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={busy}
+            required
+          />
+        </label>
 
-              <div>
-                <label className="block text-sm font-medium">Password</label>
-                <input
-                  className="mt-1 w-full rounded-xl border p-3"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  type="password"
-                  autoComplete="current-password"
-                  placeholder="••••••••"
-                  required
-                />
-              </div>
+        <label className="flex flex-col gap-1">
+          <span className="text-sm text-muted-foreground">Password</span>
+          <input
+            className="rounded-md border px-3 py-2"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            disabled={busy}
+            required
+          />
+        </label>
 
-              <button
-                className="w-full rounded-xl bg-black text-white p-3 font-medium disabled:opacity-60"
-                type="submit"
-                disabled={busy}
-              >
-                {busy ? "Signing in…" : "Sign in"}
-              </button>
-            </form>
+        <button
+          type="submit"
+          disabled={busy}
+          className="rounded-md bg-black px-4 py-2 text-white disabled:opacity-50"
+        >
+          {busy ? "Signing in…" : "Sign in"}
+        </button>
 
-            <div className="border-t pt-4">
-              <button
-                className="w-full rounded-xl border p-3 text-sm hover:bg-gray-50 disabled:opacity-60"
-                onClick={signUpWithPassword}
-                disabled={busy || !email.trim() || !password}
-                type="button"
-              >
-                {busy ? "Working…" : "Create account (sign up)"}
-              </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => go("/resume")}
+          className="rounded-md border px-4 py-2 disabled:opacity-50"
+        >
+          Continue without signing in
+        </button>
+      </form>
 
-              <p className="mt-2 text-xs text-gray-600">
-                Tip: for fastest local testing, create a user in Supabase Auth → Users and set a password.
-              </p>
-            </div>
-          </div>
-        ) : (
-          <form className="mt-6 space-y-4" onSubmit={sendMagicLink}>
-            <div>
-              <label className="block text-sm font-medium">Email</label>
-              <input
-                className="mt-1 w-full rounded-xl border p-3"
-                value={magicEmail}
-                onChange={(e) => setMagicEmail(e.target.value)}
-                type="email"
-                autoComplete="email"
-                placeholder="you@example.com"
-                required
-              />
-            </div>
-
-            <button
-              className="w-full rounded-xl bg-black text-white p-3 font-medium disabled:opacity-60"
-              type="submit"
-              disabled={busy}
-            >
-              {busy ? "Sending…" : "Send magic link"}
-            </button>
-          </form>
-        )}
-
-        {status && <p className="mt-4 text-sm">{status}</p>}
-      </div>
-    </main>
+      <p className="text-xs text-muted-foreground">
+        After signing in you should be redirected to{" "}
+        <code className="rounded bg-gray-100 px-1 py-0.5">/resume</code>
+        {nextParam ? (
+          <>
+            {" "}
+            (or back to{" "}
+            <code className="rounded bg-gray-100 px-1 py-0.5">{nextParam}</code>)
+          </>
+        ) : null}
+        .
+      </p>
+    </div>
   );
 }
