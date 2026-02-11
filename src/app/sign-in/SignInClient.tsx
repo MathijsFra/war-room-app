@@ -43,9 +43,9 @@ export default function SignInClient() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) router.replace(nextParam ?? "/");
+      if (data.session) router.replace(nextParam ?? "/resume");
     });
-  }, [router]);
+  }, [router, nextParam]);
 
   async function signInWithPassword(e: React.FormEvent) {
     e.preventDefault();
@@ -64,7 +64,7 @@ export default function SignInClient() {
       return;
     }
 
-    router.replace(nextParam ?? "/");
+    router.replace(nextParam ?? "/resume");
   }
 
   async function signUpWithPassword() {
