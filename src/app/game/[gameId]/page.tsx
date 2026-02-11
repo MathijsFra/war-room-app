@@ -64,7 +64,7 @@ export default function GamePage() {
   }, [currentNation]);
 
   useEffect(() => {
-    if (!loading && !session) router.replace("/sign-in");
+    if (!loading && !session) router.replace(`/sign-in?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
   }, [loading, session, router]);
 
   async function refreshGame() {

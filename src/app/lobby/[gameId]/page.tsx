@@ -44,7 +44,7 @@ export default function LobbyPage() {
   const refreshingRef = useRef(false);
 
   useEffect(() => {
-    if (!loading && !session) router.replace("/sign-in");
+    if (!loading && !session) router.replace(`/sign-in?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
   }, [loading, session, router]);
 
   async function refreshLobby() {

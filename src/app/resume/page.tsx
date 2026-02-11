@@ -32,7 +32,7 @@ export default function ResumePage() {
   useEffect(() => {
     if (loading) return;
     if (!session) {
-      router.replace("/sign-in");
+      router.replace(`/sign-in?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
       return;
     }
 
@@ -44,7 +44,7 @@ export default function ResumePage() {
 
   async function signOut() {
     await supabase.auth.signOut();
-    router.replace("/sign-in");
+    router.replace(`/sign-in?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
   }
 
   async function load() {

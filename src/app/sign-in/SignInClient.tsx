@@ -17,6 +17,20 @@ export default function SignInClient() {
 
   const [mode, setMode] = useState<Mode>(initialMode);
 
+
+  const nextParam = useMemo(() => {
+    const raw = searchParams.get("next");
+    if (!raw) return null;
+    try {
+      const decoded = decodeURIComponent(raw);
+      // basic open-redirect protection: only allow local paths
+      if (!decoded.startsWith("/") || decoded.startsWith("//")) return null;
+      return decoded;
+    } catch {
+      return null;
+    }
+  }, [searchParams]);
+
   // password form
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -29,7 +43,7 @@ export default function SignInClient() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) router.replace("/");
+      if (data.session) router.replace(nextParam ?? "/");
     });
   }, [router]);
 
@@ -50,7 +64,7 @@ export default function SignInClient() {
       return;
     }
 
-    router.replace("/");
+    router.replace(nextParam ?? "/");
   }
 
   async function signUpWithPassword() {

@@ -26,7 +26,7 @@ export default function JoinGameClient() {
   }, [initialGameId]);
 
   useEffect(() => {
-    if (!loading && !session) router.replace("/sign-in");
+    if (!loading && !session) router.replace(`/sign-in?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
   }, [loading, session, router]);
 
   useEffect(() => {

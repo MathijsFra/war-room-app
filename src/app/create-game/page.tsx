@@ -25,7 +25,7 @@ export default function CreateGamePage() {
 
   useEffect(() => {
     if (!loading && !session) {
-      router.replace("/sign-in");
+      router.replace(`/sign-in?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
     }
   }, [loading, session, router]);
 

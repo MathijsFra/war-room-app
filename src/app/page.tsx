@@ -11,7 +11,7 @@ export default function HomePage() {
   useEffect(() => {
     if (loading) return;
     if (!session) {
-      router.replace("/sign-in");
+      router.replace(`/sign-in?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
       return;
     }
 
