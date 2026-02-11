@@ -73,6 +73,7 @@ export default function SignInClient() {
   }, [router, nextParam]);
 
   async function signInWithPassword(e: React.FormEvent) {
+  setStatus("Signing in…");
     e.preventDefault();
     setBusy(true);
     setStatus(null);
