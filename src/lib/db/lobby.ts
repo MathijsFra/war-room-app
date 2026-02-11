@@ -4,6 +4,7 @@ export type GameStatus = "LOBBY" | "ACTIVE" | "FINISHED";
 export type GamePhase =
   | "ECONOMY"
   | "PLANNING"
+  | "STRATEGIC_PLANNING"
   | "MOVEMENT"
   | "COMBAT"
   | "REFIT_DEPLOY"
@@ -46,6 +47,13 @@ export function normalizeNationKey(n: string) {
     .replace(/_/g, " ")
     .replace(/\s+/g, " ")
     .toUpperCase();
+}
+
+function extractNationId(raw: any): string | null {
+  if (!raw) return null;
+  if (typeof raw === "string") return raw;
+  if (typeof raw === "object" && typeof raw.id === "string") return raw.id;
+  return null;
 }
 
 export async function fetchLobby(gameId: string): Promise<LobbyState> {
@@ -96,32 +104,15 @@ export async function fetchLobby(gameId: string): Promise<LobbyState> {
   const isHost = !!mePlayer?.is_host;
 
   // ===== Nation Phase State (DB source of truth) =====
-  // We normalize keys so page lookup never breaks due to casing/spaces/underscores.
   const nationPhaseStatusByNation: Record<string, string> = {};
 
   const currentRound = game.round ?? 1;
-  const currentPhase = (game.phase ?? "ECONOMY") as any;
+  const currentPhase = (game.phase ?? "ECONOMY") as GamePhase;
 
-  // 1) Nations for this game
-  const { data: nations, error: nationsErr } = await supabase
-    .from("nations")
-    .select("id, nation_key")
-    .eq("game_id", gameId);
-
-  if (nationsErr) throw new Error(nationsErr.message);
-
-  const nationKeyById = new Map<string, string>();
-  for (const n of nations ?? []) {
-    const nk = normalizeNationKey(n.nation_key);
-    nationKeyById.set(n.id, nk);
-    // default
-    nationPhaseStatusByNation[nk] = "DRAFT";
-  }
-
-  // 2) Phase state rows for current round + phase
+  // Pull phase-state AND the nation_key via FK join
   const { data: states, error: statesErr } = await supabase
     .from("nation_phase_state")
-    .select("nation_id, status")
+    .select("status, nation:nations(nation_key)")
     .eq("game_id", gameId)
     .eq("round", currentRound)
     .eq("phase", currentPhase);
@@ -129,9 +120,16 @@ export async function fetchLobby(gameId: string): Promise<LobbyState> {
   if (statesErr) throw new Error(statesErr.message);
 
   for (const s of states ?? []) {
-    const nk = nationKeyById.get(s.nation_id);
-    if (nk) nationPhaseStatusByNation[nk] = s.status;
+    const nationKeyRaw = (s as any).nation?.nation_key;
+    if (!nationKeyRaw) {
+      console.log("[DEBUG] Missing joined nation_key in row", s);
+      continue;
+    }
+    const nk = normalizeNationKey(nationKeyRaw);
+    nationPhaseStatusByNation[nk] = (s as any).status;
   }
+
+  console.log("[DEBUG] nationPhaseStatusByNation AFTER MAP", nationPhaseStatusByNation);
 
   return {
     game: game as LobbyGame,
@@ -143,6 +141,7 @@ export async function fetchLobby(gameId: string): Promise<LobbyState> {
     isHost,
   };
 }
+
 
 export async function assignNation(args: { gameId: string; playerId: string; nation: string }) {
   const { error } = await supabase.from("player_nations").insert({

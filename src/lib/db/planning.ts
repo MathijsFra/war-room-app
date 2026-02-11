@@ -26,6 +26,13 @@ export type RegionRow = {
   name: string;
 };
 
+export type BidRow = {
+  id: string;
+  oil_spent: number;
+  revealed: boolean;
+  created_at: string;
+};
+
 export async function getNationByKey(gameId: string, nationKey: string): Promise<NationRow> {
   const { data, error } = await supabase
     .from("nations")
@@ -140,6 +147,71 @@ export async function clearOrderSlot(args: {
     .eq("nation_id", args.nationId)
     .eq("round", args.round)
     .eq("slot", args.slot);
+
+  if (error) throw new Error(error.message);
+}
+
+// ===== Oil bid (Strategic Planning) =====
+// The current schema stores bids per (game_id, nation_id) without round.
+// For the framework, we treat the latest bid as the active one for the current round.
+export async function getLatestBid(args: { gameId: string; nationId: string }): Promise<BidRow | null> {
+  const { data, error } = await supabase
+    .from("bids")
+    .select("id, oil_spent, revealed, created_at")
+    .eq("game_id", args.gameId)
+    .eq("nation_id", args.nationId)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (error) throw new Error(error.message);
+  return (data && data.length > 0 ? (data[0] as BidRow) : null);
+}
+
+export async function saveBid(args: {
+  gameId: string;
+  nationId: string;
+  oilSpent: number;
+}): Promise<void> {
+  // Update latest unrevealed bid if present, else insert a new one
+  const { data: existing, error: selErr } = await supabase
+    .from("bids")
+    .select("id")
+    .eq("game_id", args.gameId)
+    .eq("nation_id", args.nationId)
+    .eq("revealed", false)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (selErr) throw new Error(selErr.message);
+
+  const oil = Math.max(0, Math.floor(args.oilSpent));
+
+  if (existing && existing.length > 0) {
+    const { error } = await supabase
+      .from("bids")
+      .update({ oil_spent: oil })
+      .eq("id", existing[0].id);
+    if (error) throw new Error(error.message);
+    return;
+  }
+
+  const { error } = await supabase.from("bids").insert({
+    game_id: args.gameId,
+    nation_id: args.nationId,
+    oil_spent: oil,
+    revealed: false,
+  });
+  if (error) throw new Error(error.message);
+}
+
+export async function clearBid(args: { gameId: string; nationId: string }): Promise<void> {
+  // Delete unrevealed bids for this nation (keeps history if revealed)
+  const { error } = await supabase
+    .from("bids")
+    .delete()
+    .eq("game_id", args.gameId)
+    .eq("nation_id", args.nationId)
+    .eq("revealed", false);
 
   if (error) throw new Error(error.message);
 }

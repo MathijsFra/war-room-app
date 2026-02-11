@@ -3,12 +3,19 @@
 type Props = {
   status?: string | null;
   round?: number | null;
-  phase?: string | null; // ECONOMY | PLANNING | MOVEMENT | COMBAT | REFIT_DEPLOY | MORALE | PRODUCTION
+  phase?: string | null; // ECONOMY | (PLANNING|STRATEGIC_PLANNING) | MOVEMENT | COMBAT | REFIT_DEPLOY | MORALE | PRODUCTION
 };
+
+function normalizePhaseCode(phase?: string | null) {
+  if (!phase) return null;
+  // Backwards compatibility: DB enum may still use PLANNING.
+  if (phase === "PLANNING") return "STRATEGIC_PLANNING";
+  return phase;
+}
 
 const PHASE_ORDER: Array<{ code: string; name: string }> = [
   { code: "ECONOMY", name: "Direct National Economy" },
-  { code: "PLANNING", name: "Strategic Planning" },
+  { code: "STRATEGIC_PLANNING", name: "Strategic Planning" },
   { code: "MOVEMENT", name: "Movement Operations" },
   { code: "COMBAT", name: "Combat Operations" },
   { code: "REFIT_DEPLOY", name: "Refit & Deploy" },
@@ -25,7 +32,8 @@ export default function PhaseIndicator({ status, round, phase }: Props) {
     );
   }
 
-  const idx = PHASE_ORDER.findIndex((p) => p.code === phase);
+  const normalizedPhase = normalizePhaseCode(phase);
+  const idx = PHASE_ORDER.findIndex((p) => p.code === normalizedPhase);
 
   if (idx === -1) {
     return (

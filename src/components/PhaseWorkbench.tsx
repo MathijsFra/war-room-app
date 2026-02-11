@@ -2,9 +2,18 @@
 
 import type { GamePhase } from "@/lib/db/lobby";
 
+function normalizePhaseCode(phase: GamePhase | null | undefined): GamePhase {
+  // Backwards compatibility: DB enum may still use PLANNING.
+  return ((phase ?? "ECONOMY") === "PLANNING" ? "STRATEGIC_PLANNING" : (phase ?? "ECONOMY")) as GamePhase;
+}
+
 const PHASES: { key: GamePhase; title: string; subtitle: string }[] = [
   { key: "ECONOMY", title: "Phase 1: Direct National Economy", subtitle: "Tally income and update resources." },
-  { key: "PLANNING", title: "Phase 2: Strategic Planning", subtitle: "Write orders and bid for turn order." },
+  {
+    key: "STRATEGIC_PLANNING",
+    title: "Phase 2: Strategic Planning",
+    subtitle: "Write orders and bid for turn order.",
+  },
   { key: "MOVEMENT", title: "Phase 3: Movement Operations", subtitle: "Resolve movement in turn order." },
   { key: "COMBAT", title: "Phase 4: Combat Operations", subtitle: "Resolve hotspots and raids." },
   { key: "REFIT_DEPLOY", title: "Phase 5: Refit & Deploy", subtitle: "Land air, deploy new units, reorganize commands." },
@@ -17,7 +26,7 @@ export default function PhaseWorkbench(props: {
   round: number | null | undefined;
   actingNation: string | null;
 }) {
-  const phase = (props.phase ?? "ECONOMY") as GamePhase;
+  const phase = normalizePhaseCode(props.phase);
   const round = props.round ?? 1;
 
   const current = PHASES.find((p) => p.key === phase) ?? PHASES[0];
