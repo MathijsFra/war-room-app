@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { useRouter, useSearchParams } from "next/navigation";
 
@@ -41,10 +41,35 @@ export default function SignInClient() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
+  // Avoid double-redirects in dev and handle auth state reliably.
+  const redirectedRef = useRef(false);
+
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) router.replace(nextParam ?? "/resume");
+    // 1) If we already have a session, go straight to the target page.
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (error) {
+        setStatus(error.message);
+        return;
+      }
+      if (data.session && !redirectedRef.current) {
+        redirectedRef.current = true;
+        router.replace(nextParam ?? "/resume");
+      }
     });
+
+    // 2) Also listen for SIGNED_IN events. This is more reliable than
+    // immediately redirecting after signInWithPassword, because the session
+    // persistence can complete asynchronously.
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if ((event === "SIGNED_IN" || event === "TOKEN_REFRESHED") && session && !redirectedRef.current) {
+        redirectedRef.current = true;
+        router.replace(nextParam ?? "/resume");
+      }
+    });
+
+    return () => {
+      sub.subscription.unsubscribe();
+    };
   }, [router, nextParam]);
 
   async function signInWithPassword(e: React.FormEvent) {
@@ -52,41 +77,49 @@ export default function SignInClient() {
     setBusy(true);
     setStatus(null);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
 
-    setBusy(false);
+      if (error) {
+        setStatus(error.message);
+        return;
+      }
 
-    if (error) {
-      setStatus(error.message);
-      return;
+      // Redirect happens via onAuthStateChange above.
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "Sign-in failed");
+    } finally {
+      setBusy(false);
     }
-
-    router.replace(nextParam ?? "/resume");
   }
 
   async function signUpWithPassword() {
     setBusy(true);
     setStatus(null);
 
-    const { error } = await supabase.auth.signUp({
-      email: email.trim(),
-      password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
+    try {
+      const { error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+        },
+      });
 
-    setBusy(false);
+      if (error) {
+        setStatus(error.message);
+        return;
+      }
 
-    if (error) {
-      setStatus(error.message);
-      return;
+      setStatus("Account created. If email confirmations are enabled, check your email to confirm.");
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "Sign-up failed");
+    } finally {
+      setBusy(false);
     }
-
-    setStatus("Account created. If email confirmations are enabled, check your email to confirm.");
   }
 
   async function sendMagicLink(e: React.FormEvent) {
@@ -94,21 +127,25 @@ export default function SignInClient() {
     setBusy(true);
     setStatus(null);
 
-    const { error } = await supabase.auth.signInWithOtp({
-      email: magicEmail.trim(),
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email: magicEmail.trim(),
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+        },
+      });
 
-    setBusy(false);
+      if (error) {
+        setStatus(error.message);
+        return;
+      }
 
-    if (error) {
-      setStatus(error.message);
-      return;
+      setStatus("Check your email for the sign-in link.");
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "Failed to send magic link");
+    } finally {
+      setBusy(false);
     }
-
-    setStatus("Check your email for the sign-in link.");
   }
 
   return (
