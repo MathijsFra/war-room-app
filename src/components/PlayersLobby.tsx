@@ -1,99 +1,164 @@
 "use client";
 
-import { useMemo } from "react";
-import type { LobbyPlayer } from "@/lib/db/lobby";
+type Player = {
+  id: string;
+  display_name: string;
+};
 
-const NATIONS = [
-  "USA",
-  "United Kingdom",
-  "Soviet Union",
-  "Germany",
-  "Japan",
-  "Italy",
-  "China",
-  "France",
-] as const;
-
-export default function PlayersLobby(props: {
-  players: LobbyPlayer[];
+type PlayersLobbyProps = {
+  players: Player[];
   meUserId: string;
   isHost: boolean;
-  onSetNation: (playerId: string, nation: string | null) => void;
-}) {
-  const { players, meUserId, isHost, onSetNation } = props;
+  nationsByPlayerId: Record<string, string[]>;
+  assignedNations: string[];
+  onAssignNation: (playerId: string, nation: string) => void;
+  onUnassignNation: (playerId: string, nation: string) => void;
+};
 
-  const taken = useMemo(() => {
-    const s = new Set<string>();
-    for (const p of players) if (p.nation) s.add(p.nation);
-    return s;
-  }, [players]);
+/**
+ * Formal rulebook nation names (strict).
+ * Alliance rule:
+ * - Axis: GERMANY, ITALY, IMPERIAL JAPAN
+ * - Allied: SOVIET UNION, UNITED STATES, BRITISH COMMONWEALTH, CHINA
+ */
+const AXIS = ["GERMANY", "ITALY", "IMPERIAL JAPAN"] as const;
+const ALLIED = ["SOVIET UNION", "UNITED STATES", "BRITISH COMMONWEALTH", "CHINA"] as const;
+
+const ALL_NATIONS_FORMAL = [...ALLIED, ...AXIS] as const;
+
+function allianceOf(nation: string): "AXIS" | "ALLIED" {
+  return (AXIS as readonly string[]).includes(nation) ? "AXIS" : "ALLIED";
+}
+
+function AllianceBadge({ alliance }: { alliance: "AXIS" | "ALLIED" }) {
+  const cls =
+    alliance === "AXIS"
+      ? "border-red-400/30 bg-red-400/10 text-red-200"
+      : "border-sky-400/30 bg-sky-400/10 text-sky-200";
 
   return (
-    <div className="rounded-2xl border p-5">
-      <h2 className="text-lg font-semibold">Players</h2>
+    <span
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] tracking-[0.18em] uppercase ${cls}`}
+      title={alliance === "AXIS" ? "Axis nations only" : "Allied nations only"}
+    >
+      {alliance}
+    </span>
+  );
+}
 
-      <div className="mt-4 space-y-3">
-        {players.map((p) => (
-          <div
-            key={p.id}
-            className="flex flex-col gap-2 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between"
-          >
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <div className="font-medium truncate">
-                  {p.display_name}
-                  {p.user_id === meUserId ? " (you)" : ""}
+export default function PlayersLobby({
+  players,
+  meUserId,
+  isHost,
+  nationsByPlayerId,
+  assignedNations,
+  onAssignNation,
+  onUnassignNation,
+}: PlayersLobbyProps) {
+  return (
+    <section className="space-y-4">
+      <h2 className="text-sm font-semibold tracking-wide uppercase text-zinc-400">
+        Command Assignments
+      </h2>
+
+      <div className="space-y-3">
+        {players.map((player) => {
+          const isMe = player.id === meUserId;
+          const playerNations = nationsByPlayerId[player.id] ?? [];
+
+          // Lock alliance after the first nation is assigned
+          const playerAlliance: "AXIS" | "ALLIED" | null =
+            playerNations.length > 0 ? allianceOf(playerNations[0]) : null;
+
+          return (
+            <div
+              key={player.id}
+              className="rounded-2xl border border-white/10 bg-gradient-to-b from-zinc-900 to-zinc-950 p-4"
+            >
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="truncate text-sm font-medium">
+                      {player.display_name}
+                      {isMe && <span className="ml-2 text-xs text-amber-400">(You)</span>}
+                    </div>
+
+                    {playerAlliance && <AllianceBadge alliance={playerAlliance} />}
+                  </div>
+
+                  <div className="mt-1 text-xs text-zinc-500">
+                    Nations controlled: {playerNations.length}
+                    {playerAlliance ? ` • Locked to ${playerAlliance}` : " • Unassigned (choose Axis or Allied)"}
+                  </div>
                 </div>
-                {p.is_host && (
-                  <span className="rounded-full border px-2 py-0.5 text-xs">
-                    Host
-                  </span>
+
+                <div className="text-[10px] text-zinc-500">{isHost ? "Host view" : "Player view"}</div>
+              </div>
+
+              {/* Assigned nations (click to unassign if host) */}
+              <div className="mb-3 flex flex-wrap gap-2">
+                {playerNations.length === 0 && (
+                  <span className="text-xs text-zinc-500 italic">No nations assigned</span>
                 )}
+
+                {playerNations.map((nation) => (
+                  <button
+                    key={nation}
+                    type="button"
+                    onClick={() => isHost && onUnassignNation(player.id, nation)}
+                    className="inline-flex items-center rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-xs text-amber-200 hover:bg-amber-400/20 disabled:opacity-50"
+                    disabled={!isHost}
+                    title={isHost ? "Unassign nation" : undefined}
+                  >
+                    {nation}
+                  </button>
+                ))}
               </div>
-              <div className="text-sm text-gray-600">
-                Nation: {p.nation ?? "—"}
-              </div>
+
+              {/* Assignment controls (host only) */}
+              {isHost && (
+                <div className="flex flex-wrap gap-2">
+                  {ALL_NATIONS_FORMAL.map((nation) => {
+                    const taken = assignedNations.includes(nation);
+                    const alreadyHas = playerNations.includes(nation);
+
+                    // If nation is taken by another player, hide it (unless this player already has it)
+                    if (taken && !alreadyHas) return null;
+
+                    // Enforce single-alliance-per-player in UI:
+                    const nationAlliance = allianceOf(nation);
+                    if (playerAlliance && nationAlliance !== playerAlliance) return null;
+
+                    return (
+                      <button
+                        key={nation}
+                        type="button"
+                        onClick={() => onAssignNation(player.id, nation)}
+                        disabled={alreadyHas}
+                        className={`rounded-full px-3 py-1 text-xs border transition ${
+                          alreadyHas
+                            ? "border-white/10 bg-white/5 text-zinc-500"
+                            : "border-white/10 bg-zinc-950 text-zinc-300 hover:border-amber-400/40 hover:text-amber-200"
+                        }`}
+                        title={
+                          alreadyHas
+                            ? "Already assigned"
+                            : playerAlliance
+                              ? `Assign (${playerAlliance} only)`
+                              : `Assign (${nationAlliance})`
+                        }
+                      >
+                        {alreadyHas ? "✓ " : "+ "}
+                        {nation}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-
-            {isHost ? (
-              <div className="flex items-center gap-2">
-                <select
-                  className="rounded-xl border p-2 text-sm"
-                  value={p.nation ?? ""}
-                  onChange={(e) =>
-                    onSetNation(p.id, e.target.value ? e.target.value : null)
-                  }
-                >
-                  <option value="">(Unassigned)</option>
-                  {NATIONS.map((n) => (
-                    <option
-                      key={n}
-                      value={n}
-                      disabled={taken.has(n) && p.nation !== n}
-                    >
-                      {n}
-                    </option>
-                  ))}
-                </select>
-
-                <button
-                  type="button"
-                  className="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50"
-                  onClick={() => onSetNation(p.id, null)}
-                >
-                  Clear
-                </button>
-              </div>
-            ) : null}
-          </div>
-        ))}
+          );
+        })}
       </div>
-
-      {!isHost && (
-        <p className="mt-4 text-sm text-gray-600">
-          Only the host can assign nations.
-        </p>
-      )}
-    </div>
+    </section>
   );
 }

@@ -1,32 +1,31 @@
 import { supabase } from "@/lib/supabase/client";
 
+type JoinGameResult =
+  | { ok: true; player_id: string; game_id: string }
+  | { ok: false; reason: string; current?: number; max?: number; status?: string };
+
 export async function joinGame(params: { gameId: string; displayName: string }) {
   const gameId = params.gameId.trim();
   if (!gameId) throw new Error("Game ID is required");
 
-  const { data: authData, error: authErr } = await supabase.auth.getUser();
-  if (authErr) throw new Error(authErr.message);
+  const { data: authData } = await supabase.auth.getUser();
   if (!authData.user) throw new Error("Not authenticated");
 
-  const userId = authData.user.id;
+  const { data, error } = await supabase.rpc("join_game", {
+    gid: gameId,
+    display_name: params.displayName,
+  });
 
-  const payload = {
-    game_id: gameId,
-    user_id: userId,
-    display_name: params.displayName.trim(),
-    is_host: false,
-  };
+  if (error) throw new Error(error.message);
 
-  const { error } = await supabase
-    .from("players")
-    .insert(payload, { returning: "minimal" as any });
-
-  if (error) {
-    // 23505 = unique_violation (already joined). Treat as success.
-    if ((error as any).code === "23505") return gameId;
-
-    throw new Error(error.message);
+  const res = data as JoinGameResult;
+  if (!res.ok) {
+    if (res.reason === "GAME_FULL") throw new Error("Game is full.");
+    if (res.reason === "GAME_ALREADY_STARTED") throw new Error("Game already started.");
+    if (res.reason === "GAME_NOT_FOUND") throw new Error("Game not found.");
+    if (res.reason === "NOT_AUTHENTICATED") throw new Error("Not authenticated.");
+    throw new Error(`Unable to join (${res.reason})`);
   }
 
-  return gameId;
+  return res.game_id;
 }

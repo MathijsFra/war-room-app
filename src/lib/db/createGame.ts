@@ -44,5 +44,45 @@ export async function createGame(params: {
 
   if (playerErr) throw new Error(playerErr.message);
 
+  // 3) Seed nations for the selected scenario.
+  // For Global War (your primary target), all 7 playable nations are in play.
+  // We store one row per nation in `public.nations` so later gameplay tables
+  // can reference them via foreign keys.
+  const nationsInScenario = getScenarioNations(params.scenario);
+
+  if (nationsInScenario.length > 0) {
+    const { error: nationsErr } = await supabase.from("nations").insert(
+      nationsInScenario.map((nation_key) => ({
+        game_id: gameId,
+        nation_key,
+        // player_id is intentionally left null; assignment is done through
+        // `player_nations` (supports multi-nation players).
+      }))
+    );
+
+    if (nationsErr) throw new Error(nationsErr.message);
+  }
+
   return gameId;
+}
+
+function getScenarioNations(scenario: string): string[] {
+  // Use formal rulebook nation names (consistent with player_nations.nation).
+  // Global War includes all 7 playable nations.
+  switch (scenario) {
+    case "Global War":
+      return [
+        "CHINA",
+        "BRITISH COMMONWEALTH",
+        "SOVIET UNION",
+        "UNITED STATES",
+        "GERMANY",
+        "ITALY",
+        "IMPERIAL JAPAN",
+      ];
+    // Keep other scenarios conservative for now; you can expand these later.
+    // Returning [] means we don't seed nations.
+    default:
+      return [];
+  }
 }

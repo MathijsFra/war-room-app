@@ -1,65 +1,47 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase/client";
-import { useSession } from "@/lib/supabase/useSession";
+import { usePathname } from "next/navigation";
 
-export default function AppHeader() {
-  const router = useRouter();
+type AppHeaderProps = {
+  rightSlot?: React.ReactNode;
+};
+
+export default function AppHeader({ rightSlot }: AppHeaderProps) {
   const pathname = usePathname();
-  const { session, loading } = useSession();
-
-  const showHeader =
-    pathname !== "/sign-in" && !pathname.startsWith("/auth/callback");
-
-  const showBack = pathname !== "/";
-
-  async function signOut() {
-    await supabase.auth.signOut();
-    router.replace("/sign-in");
-  }
-
-  if (!showHeader) return null;
 
   return (
-    <header className="border-b bg-white">
-      <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
-        <div className="flex items-center gap-3">
-          <Link href="/" className="text-lg font-semibold">
-            War Room Companion
-          </Link>
-
-          {showBack && (
-            <button
-              type="button"
-              onClick={() => router.back()}
-              className="rounded-xl border px-3 py-1.5 text-sm hover:bg-gray-50"
-              aria-label="Go back"
-            >
-              ← Back
-            </button>
-          )}
-        </div>
-
-        <div className="flex items-center gap-3">
-          {!loading && session ? (
-            <button
-              onClick={signOut}
-              className="rounded-xl border px-4 py-2 text-sm hover:bg-gray-50"
-            >
-              Sign out
-            </button>
-          ) : (
-            <Link
-              href="/sign-in"
-              className="rounded-xl border px-4 py-2 text-sm hover:bg-gray-50"
-            >
-              Sign in
+    <header className="sticky top-0 z-40 border-b border-white/10 bg-zinc-950/80 backdrop-blur">
+      <div className="mx-auto max-w-6xl px-4">
+        <div className="flex h-14 items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <Link href="/" className="flex items-center gap-2 text-sm font-semibold tracking-wide">
+              <span className="text-amber-400">WAR ROOM</span>
+              <span className="hidden sm:inline text-zinc-400">Operations Console</span>
             </Link>
-          )}
+
+            <div className="hidden md:flex items-center gap-2 text-xs text-zinc-500">
+              <span className="h-1 w-1 rounded-full bg-zinc-600" />
+              <span className="uppercase tracking-[0.18em]">{sectionFromPath(pathname)}</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {rightSlot}
+            <span className="inline-flex h-2 w-2 rounded-full bg-emerald-400/70" title="Connected" />
+          </div>
         </div>
       </div>
     </header>
   );
+}
+
+function sectionFromPath(pathname: string): string {
+  if (pathname.startsWith("/resume")) return "Resume";
+  if (pathname.startsWith("/lobby")) return "Lobby";
+  if (pathname.startsWith("/game")) return "In Session";
+  if (pathname.startsWith("/create-game")) return "Setup";
+  if (pathname.startsWith("/join-game")) return "Join";
+  if (pathname.startsWith("/auth") || pathname.startsWith("/sign-in")) return "Authentication";
+  return "Command";
 }
