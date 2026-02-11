@@ -9,6 +9,7 @@ import AppHeader from "@/components/AppHeader";
 import PhaseIndicator from "@/components/PhaseIndicator";
 import CommanderPanel from "@/components/CommanderPanel";
 import NationPhaseStatusChip from "@/components/NationPhaseStatusChip";
+import PhaseWorkbench from "@/components/PhaseWorkbench";
 
 import {
   fetchLobby,
@@ -16,6 +17,7 @@ import {
   setCurrentNation as setCurrentNationDb,
   commitCurrentPhase,
   uncommitCurrentPhase,
+  normalizeNationKey,
 } from "@/lib/db/lobby";
 
 import type { LobbyGame, LobbyPlayer, LobbyState } from "@/lib/db/lobby";
@@ -34,16 +36,15 @@ export default function GamePage() {
   const [isHost, setIsHost] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Commander panel
   const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
   const [myName, setMyName] = useState("—");
   const [myNations, setMyNations] = useState<string[]>([]);
   const [currentNation, setCurrentNation] = useState<string | null>(null);
-  const [nationPhaseStatusByNation, setNationPhaseStatusByNation] = useState<Record<string, string | null>>({});
 
-  const committingRef = useRef(false);
+  const [nationPhaseStatusByNation, setNationPhaseStatusByNation] = useState<Record<string, string>>({});
 
   const refreshingRef = useRef(false);
+  const committingRef = useRef(false);
   const advancingRef = useRef(false);
 
   useEffect(() => {
@@ -64,11 +65,9 @@ export default function GamePage() {
       setNationsByPlayerId(data.nationsByPlayerId);
       setMeUserId(data.meUserId);
       setIsHost(data.isHost);
-      // Don't clobber locally known status (e.g. after a commit) if the server
-      // couldn't return nation_phase_state due to RLS.
-      if (data.nationPhaseStatusByNation && Object.keys(data.nationPhaseStatusByNation).length > 0) {
-        setNationPhaseStatusByNation(data.nationPhaseStatusByNation);
-      }
+
+      // Always trust DB: this must reflect nation_phase_state after refresh
+      setNationPhaseStatusByNation(data.nationPhaseStatusByNation);
 
       const mePlayer = data.players.find((p) => p.user_id === data.meUserId) ?? null;
       setMyPlayerId(mePlayer?.id ?? null);
@@ -99,7 +98,6 @@ export default function GamePage() {
   }
 
   useEffect(() => {
-    // Remember the most recent game so we can resume after closing a tab.
     saveLastGameId(gameId);
     refreshGame();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -111,16 +109,8 @@ export default function GamePage() {
 
     const channel = supabase
       .channel(`rt:game:${gameId}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "games", filter: `id=eq.${gameId}` },
-        refreshGame
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "players", filter: `game_id=eq.${gameId}` },
-        refreshGame
-      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "games", filter: `id=eq.${gameId}` }, refreshGame)
+      .on("postgres_changes", { event: "*", schema: "public", table: "players", filter: `game_id=eq.${gameId}` }, refreshGame)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "player_nations", filter: `game_id=eq.${gameId}` },
@@ -139,7 +129,7 @@ export default function GamePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, gameId]);
 
-  // Polling fallback
+  // Poll fallback
   useEffect(() => {
     if (!session) return;
     const id = window.setInterval(() => refreshGame(), 2000);
@@ -163,32 +153,39 @@ export default function GamePage() {
     }
   }
 
+  async function onChangeNation(nation: string) {
+    if (!myPlayerId) return;
+    setCurrentNation(nation);
+    saveCurrentNation(gameId, nation);
+
+    try {
+      await setCurrentNationDb(gameId, myPlayerId, nation);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to set current nation");
+    }
+  }
+
   async function onToggleCommit() {
     if (!game || !currentNation) return;
     if (committingRef.current) return;
 
-    // You asked to refine Phase 1: only allow committing during ECONOMY.
-    if (game.status !== "ACTIVE" || game.phase !== "ECONOMY") return;
+    // Commits are always scoped to the current round + phase in the DB.
+    if (game.status !== "ACTIVE") return;
 
-    const status = nationPhaseStatusByNation[currentNation] ?? "DRAFT";
+    const key = normalizeNationKey(currentNation);
+    const status = nationPhaseStatusByNation[key] ?? "DRAFT";
     if (status === "LOCKED") return;
-
-    const nextStatus = status === "COMMITTED" ? "DRAFT" : "COMMITTED";
 
     committingRef.current = true;
     try {
       setError(null);
-      // Optimistic UI: reflect the new state immediately.
-      setNationPhaseStatusByNation((prev) => ({ ...prev, [currentNation]: nextStatus }));
       if (status === "COMMITTED") {
         await uncommitCurrentPhase(gameId, currentNation);
       } else {
         await commitCurrentPhase(gameId, currentNation);
       }
-      await refreshGame();
+      await refreshGame(); // reload from DB (truth)
     } catch (e) {
-      // Revert optimistic update on failure.
-      setNationPhaseStatusByNation((prev) => ({ ...prev, [currentNation]: status }));
       setError(e instanceof Error ? e.message : "Failed to update commit status");
     } finally {
       committingRef.current = false;
@@ -198,8 +195,9 @@ export default function GamePage() {
   if (!loading && !session) return null;
   if (!session) return null;
 
-  const currentStatus = currentNation ? (nationPhaseStatusByNation[currentNation] ?? "DRAFT") : "DRAFT";
-  const canCommit = !!currentNation && game?.status === "ACTIVE" && game?.phase === "ECONOMY";
+  const actingKey = currentNation ? normalizeNationKey(currentNation) : "";
+  const currentStatus = actingKey ? nationPhaseStatusByNation[actingKey] ?? "DRAFT" : "DRAFT";
+  const canCommit = !!currentNation && game?.status === "ACTIVE";
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -208,7 +206,6 @@ export default function GamePage() {
           <div className="flex items-center gap-3">
             <PhaseIndicator status={game?.status} round={game?.round} phase={game?.phase} />
 
-            {/* Phase status for the nation you are acting as */}
             {currentNation && (
               <div className="flex items-center gap-2">
                 <NationPhaseStatusChip status={currentStatus as any} />
@@ -228,70 +225,58 @@ export default function GamePage() {
                     ].join(" ")}
                     title={
                       currentStatus === "COMMITTED"
-                        ? `Uncommit ECONOMY (${currentNation})`
+                        ? `Uncommit ${game?.phase ?? "PHASE"} (${currentNation})`
                         : currentStatus === "LOCKED"
-                          ? `Locked for ECONOMY (${currentNation})`
-                          : `Commit ECONOMY (${currentNation})`
+                          ? `Locked for ${game?.phase ?? "PHASE"} (${currentNation})`
+                          : `Commit ${game?.phase ?? "PHASE"} (${currentNation})`
                     }
                   >
                     {currentStatus === "COMMITTED" ? "Committed" : currentStatus === "LOCKED" ? "Locked" : "Commit"}
                   </button>
                 )}
-              </div>
-            )}
 
-            {isHost && (
-              <button
-                type="button"
-                onClick={onAdvancePhase}
-                className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-200 hover:border-amber-400/40 hover:text-amber-200"
-                title="Advance to the next rulebook phase"
-              >
-                Advance phase
-              </button>
+                {isHost && (
+                  <button
+                    type="button"
+                    onClick={onAdvancePhase}
+                    className="rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs text-amber-200 hover:bg-amber-400/20"
+                    title="Advance to the next rulebook phase"
+                  >
+                    Advance phase
+                  </button>
+                )}
+              </div>
             )}
 
             <CommanderPanel
               playerName={myName}
               nations={myNations}
               currentNation={currentNation}
-              onChangeNation={async (n) => {
-                const prev = currentNation;
-                setCurrentNation(n);
-                saveCurrentNation(gameId, n);
-
-                try {
-                  if (!myPlayerId) throw new Error("Player not loaded");
-                  await setCurrentNationDb(gameId, myPlayerId, n);
-                } catch (e) {
-                  setCurrentNation(prev ?? null);
-                  setError(e instanceof Error ? e.message : "Failed to set current nation");
-                }
-              }}
+              onChangeNation={onChangeNation}
             />
           </div>
         }
       />
 
       <div className="mx-auto max-w-6xl px-4 py-10 space-y-6">
-        <div className="rounded-2xl border border-white/10 bg-gradient-to-b from-zinc-900 to-zinc-950 p-6">
-          <div className="text-xs tracking-[0.2em] uppercase text-zinc-400">In Session</div>
-          <h1 className="mt-1 text-2xl font-semibold">{game?.scenario ?? "War Room"}</h1>
+        {error && (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
+            {error}
+          </div>
+        )}
 
-          <div className="mt-4 text-sm text-zinc-300 space-y-1">
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-zinc-300">
+          <div className="text-xs uppercase tracking-[0.2em] text-zinc-400">In Session</div>
+          <div className="mt-2 text-sm">
+            <div>Scenario: {game?.scenario ?? "—"}</div>
             <div>Round: {game?.round ?? "—"}</div>
             <div>Phase: {game?.phase ?? "—"}</div>
             <div>Acting as: {currentNation ?? "—"}</div>
+            <div>Status (this nation): {currentStatus}</div>
           </div>
         </div>
 
-        {error && (
-          <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">{error}</div>
-        )}
-
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-zinc-400 italic">
-          Phase UI will appear here. Your actions are always issued as your selected nation.
-        </div>
+        <PhaseWorkbench phase={game?.phase ?? null} round={game?.round ?? null} actingNation={currentNation} />
       </div>
     </main>
   );

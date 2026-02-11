@@ -34,11 +34,19 @@ export type LobbyState = {
   players: LobbyPlayer[];
   nationsByPlayerId: Record<string, string[]>;
   assignedNations: string[];
-  // Current round+phase readiness per nation (DRAFT/COMMITTED/LOCKED). Keyed by nation_key.
-  nationPhaseStatusByNation: Record<string, string | null>;
+  // Current round+phase readiness per nation (DRAFT/COMMITTED/LOCKED). Keyed by normalized nation_key.
+  nationPhaseStatusByNation: Record<string, string>;
   meUserId: string;
   isHost: boolean;
 };
+
+export function normalizeNationKey(n: string) {
+  return n
+    .trim()
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .toUpperCase();
+}
 
 export async function fetchLobby(gameId: string): Promise<LobbyState> {
   const {
@@ -87,41 +95,42 @@ export async function fetchLobby(gameId: string): Promise<LobbyState> {
   const mePlayer = (players ?? []).find((p) => p.user_id === meUserId) ?? null;
   const isHost = !!mePlayer?.is_host;
 
-  // Nation readiness for the CURRENT round+phase
-  // (used to drive strict "commit before advance" behavior)
-  const nationPhaseStatusByNation: Record<string, string | null> = {};
-  try {
-    const { data: nations, error: nationsErr } = await supabase
-      .from("nations")
-      .select("id, nation_key")
-      .eq("game_id", gameId);
+  // ===== Nation Phase State (DB source of truth) =====
+  // We normalize keys so page lookup never breaks due to casing/spaces/underscores.
+  const nationPhaseStatusByNation: Record<string, string> = {};
 
-    if (nationsErr) throw nationsErr;
+  const currentRound = game.round ?? 1;
+  const currentPhase = (game.phase ?? "ECONOMY") as any;
 
-    const nationIds = (nations ?? []).map((n) => n.id);
+  // 1) Nations for this game
+  const { data: nations, error: nationsErr } = await supabase
+    .from("nations")
+    .select("id, nation_key")
+    .eq("game_id", gameId);
 
-    if (nationIds.length > 0 && game?.round && game?.phase) {
-      const { data: states, error: statesErr } = await supabase
-        .from("nation_phase_state")
-        .select("nation_id, status")
-        .eq("game_id", gameId)
-        .eq("round", game.round)
-        .eq("phase", game.phase);
+  if (nationsErr) throw new Error(nationsErr.message);
 
-      if (statesErr) throw statesErr;
+  const nationKeyById = new Map<string, string>();
+  for (const n of nations ?? []) {
+    const nk = normalizeNationKey(n.nation_key);
+    nationKeyById.set(n.id, nk);
+    // default
+    nationPhaseStatusByNation[nk] = "DRAFT";
+  }
 
-      const statusByNationId = new Map<string, string>();
-      for (const s of states ?? []) {
-        statusByNationId.set(s.nation_id, s.status);
-      }
+  // 2) Phase state rows for current round + phase
+  const { data: states, error: statesErr } = await supabase
+    .from("nation_phase_state")
+    .select("nation_id, status")
+    .eq("game_id", gameId)
+    .eq("round", currentRound)
+    .eq("phase", currentPhase);
 
-      for (const n of nations ?? []) {
-        nationPhaseStatusByNation[n.nation_key] = statusByNationId.get(n.id) ?? "DRAFT";
-      }
-    }
-  } catch {
-    // If RLS blocks these tables early, we don't break the lobby.
-    // Strict enforcement still happens inside DB functions.
+  if (statesErr) throw new Error(statesErr.message);
+
+  for (const s of states ?? []) {
+    const nk = nationKeyById.get(s.nation_id);
+    if (nk) nationPhaseStatusByNation[nk] = s.status;
   }
 
   return {
@@ -135,26 +144,22 @@ export async function fetchLobby(gameId: string): Promise<LobbyState> {
   };
 }
 
-export async function assignNation(args: {
-  gameId: string;
-  playerId: string;
-  nation: string;
-}) {
+export async function assignNation(args: { gameId: string; playerId: string; nation: string }) {
   const { error } = await supabase.from("player_nations").insert({
     game_id: args.gameId,
     player_id: args.playerId,
     nation: args.nation,
   });
+  if (error) throw new Error(error.message);
+}
 
+export async function unassignNation(args: { id: string }) {
+  const { error } = await supabase.from("player_nations").delete().eq("id", args.id);
   if (error) throw new Error(error.message);
 }
 
 export async function setMaxPlayers(gameId: string, maxPlayers: number) {
-  const { error } = await supabase
-    .from("games")
-    .update({ max_players: maxPlayers })
-    .eq("id", gameId);
-
+  const { error } = await supabase.from("games").update({ max_players: maxPlayers }).eq("id", gameId);
   if (error) throw new Error(error.message);
 }
 
@@ -173,7 +178,6 @@ export async function startGame(gameId: string) {
 }
 
 export async function advancePhase(gameId: string) {
-  // SQL function signature: public.advance_phase(p_game_id uuid)
   const { error } = await supabase.rpc("advance_phase", { p_game_id: gameId });
   if (error) throw new Error(error.message);
 }
