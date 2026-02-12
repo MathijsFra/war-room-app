@@ -107,5 +107,5 @@ end;
 $$;
 
 -- Recommended: lock down execute
--- revoke all on function public.apply_economy_income(uuid, integer) from public;
--- grant execute on function public.apply_economy_income(uuid, integer) to authenticated;
+revoke all on function public.apply_economy_income(uuid, integer) from public;
+grant execute on function public.apply_economy_income(uuid, integer) to authenticated;

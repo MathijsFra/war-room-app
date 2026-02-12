@@ -343,7 +343,9 @@ export async function checkEconomyApplied(gameId: string, round: number) {
 }
 
 export async function applyEconomy(gameId: string, round: number) {
-  // Preferred path: SQL RPC (atomic + RLS-safe). If not present, fall back to client updates.
+  // Preferred path: SQL RPC (atomic + RLS-safe).
+  // IMPORTANT: updating all nations' resource tracks is typically blocked by RLS from the client.
+  // The host "Apply income (all nations)" action therefore requires the RPC to be installed.
   const { error: rpcErr } = await supabase.rpc("apply_economy_income", {
     p_game_id: gameId,
     p_round: round,
@@ -351,39 +353,17 @@ export async function applyEconomy(gameId: string, round: number) {
 
   if (!rpcErr) return;
 
-  // Fallback: compute on client + update nations sequentially.
-  const snap = await fetchEconomySnapshot(gameId);
-  const { breakdowns } = computeIncomeForAll(snap);
-
-  for (const b of breakdowns) {
-    const nation = snap.nations.find((n) => n.id === b.nation_id);
-    if (!nation) continue;
-    const newOil = nation.oil + b.totals.oil;
-    const newIron = nation.iron + b.totals.iron;
-    const newOsr = nation.osr + b.totals.osr;
-
-    const { error } = await supabase
-      .from("nations")
-      .update({ oil: newOil, iron: newIron, osr: newOsr })
-      .eq("id", nation.id)
-      .eq("game_id", gameId);
-    if (error) throw new Error(error.message);
-  }
-
-  // Record application so it can't be double-run.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const { error: logErr } = await supabase.from("game_log").insert({
-    game_id: gameId,
-    created_by: user?.id ?? "00000000-0000-0000-0000-000000000000",
-    event_type: "ECONOMY_APPLIED",
-    message: `Economy applied for round ${round}`,
-    payload: { round },
-  });
-
-  if (logErr) throw new Error(logErr.message);
+  // If the RPC isn't installed or isn't executable for the current user, fail loudly with guidance.
+  // This prevents a confusing "it said applied but values stayed 0" experience due to RLS.
+  const msg = rpcErr.message ?? String(rpcErr);
+  throw new Error(
+    [
+      "Unable to apply income because the server-side RPC is missing or not permitted.",
+      "Install the SQL function from: sql/apply_economy_income.sql",
+      "Then ensure EXECUTE is granted to authenticated (see the bottom of that SQL file).",
+      `Supabase error: ${msg}`,
+    ].join("\n")
+  );
 }
 
 export async function trySeedRegionsForGame(gameId: string) {
