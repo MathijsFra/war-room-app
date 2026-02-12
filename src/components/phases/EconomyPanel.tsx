@@ -1,7 +1,8 @@
 "use client";
 
 import PhaseShell from "@/components/phases/PhaseShell";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { supabase } from "@/lib/supabase/client";
 import {
   applyEconomy,
   checkEconomyApplied,
@@ -23,6 +24,20 @@ export default function EconomyPanel(props: {
   const [loading, setLoading] = useState(true);
   const [isApplying, setIsApplying] = useState(false);
   const [applied, setApplied] = useState(false);
+
+  // Broadcast to other clients after the host applies economy. We subscribe to the same
+  // game realtime channel name that GamePage uses so other clients can react immediately.
+  const rtRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+
+  useEffect(() => {
+    const ch = supabase.channel(`rt:game:${gameId}`);
+    rtRef.current = ch;
+    ch.subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+      rtRef.current = null;
+    };
+  }, [gameId]);
 
   const [snapshot, setSnapshot] = useState<Awaited<ReturnType<typeof fetchEconomySnapshot>> | null>(null);
 
@@ -75,6 +90,14 @@ export default function EconomyPanel(props: {
       setApplied(true);
       const snap = await fetchEconomySnapshot(gameId);
       setSnapshot(snap);
+
+      // Proactively notify other players to refresh (in case Postgres change events aren't flowing)
+      // This is a best-effort fire-and-forget.
+      void rtRef.current?.send({
+        type: "broadcast",
+        event: "economy_applied",
+        payload: { gameId, round },
+      });
     } catch (e) {
       props.onError?.(e instanceof Error ? e.message : "Failed to apply economy");
     } finally {

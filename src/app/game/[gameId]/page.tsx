@@ -190,6 +190,9 @@ export default function GamePage() {
 
     const channel = supabase
       .channel(`rt:game:${gameId}`)
+      // Client-side broadcast events: useful as a fallback if Postgres change events are not delivered
+      // (e.g. realtime publication/RLS configuration issues).
+      .on("broadcast", { event: "economy_applied" }, refreshGame)
       .on("postgres_changes", { event: "*", schema: "public", table: "games", filter: `id=eq.${gameId}` }, refreshGame)
       .on("postgres_changes", { event: "*", schema: "public", table: "players", filter: `game_id=eq.${gameId}` }, refreshGame)
       .on("postgres_changes", { event: "*", schema: "public", table: "nations", filter: `game_id=eq.${gameId}` }, refreshGame)
