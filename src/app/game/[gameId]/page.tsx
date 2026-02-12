@@ -12,6 +12,12 @@ import NationPhaseStatusChip from "@/components/NationPhaseStatusChip";
 import PhaseWorkbench from "@/components/PhaseWorkbench";
 import PlanningPanel from "@/components/PlanningPanel";
 import OilBidPanel from "@/components/OilBidPanel";
+import EconomyPanel from "@/components/phases/EconomyPanel";
+import MovementPanel from "@/components/phases/MovementPanel";
+import CombatPanel from "@/components/phases/CombatPanel";
+import RefitDeployPanel from "@/components/phases/RefitDeployPanel";
+import MoralePanel from "@/components/phases/MoralePanel";
+import ProductionPanel from "@/components/phases/ProductionPanel";
 
 import {
   fetchLobby,
@@ -300,6 +306,7 @@ export default function GamePage() {
   const phaseCode = game?.phase ?? "ECONOMY";
   const isStrategicPlanning = phaseCode === "STRATEGIC_PLANNING" || phaseCode === "PLANNING";
   const canEditPlanning = !!currentNation && game?.status === "ACTIVE" && isStrategicPlanning && currentStatus === "DRAFT";
+  const canEditPhase = !!currentNation && game?.status === "ACTIVE" && currentStatus === "DRAFT";
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -373,23 +380,91 @@ export default function GamePage() {
           </div>
         )}
 
-        {isStrategicPlanning && game?.round && currentNation ? (
+        {game?.round && currentNation ? (
           <div className="space-y-6">
-            <PlanningPanel
-              gameId={gameId}
-              round={game.round}
-              nationKey={normalizeNationKey(currentNation)}
-              phaseStatus={currentStatus}
-              canEdit={canEditPlanning}
-              onError={(m) => setError(m)}
-            />
-            <OilBidPanel
-              gameId={gameId}
-              nationKey={normalizeNationKey(currentNation)}
-              phaseStatus={currentStatus}
-              canEdit={canEditPlanning}
-              onError={(m) => setError(m)}
-            />
+            {phaseCode === "ECONOMY" && (
+              <EconomyPanel
+                gameId={gameId}
+                round={game.round}
+                nationKey={normalizeNationKey(currentNation)}
+                phaseStatus={currentStatus}
+                canEdit={canEditPhase}
+              />
+            )}
+
+            {isStrategicPlanning && (
+              <>
+                <PlanningPanel
+                  gameId={gameId}
+                  round={game.round}
+                  nationKey={normalizeNationKey(currentNation)}
+                  phaseStatus={currentStatus}
+                  canEdit={canEditPlanning}
+                  onError={(m) => setError(m)}
+                />
+                <OilBidPanel
+                  gameId={gameId}
+                  nationKey={normalizeNationKey(currentNation)}
+                  phaseStatus={currentStatus}
+                  canEdit={canEditPlanning}
+                  onError={(m) => setError(m)}
+                />
+              </>
+            )}
+
+            {phaseCode === "MOVEMENT" && (
+              <MovementPanel
+                gameId={gameId}
+                round={game.round}
+                nationKey={normalizeNationKey(currentNation)}
+                phaseStatus={currentStatus}
+                canEdit={canEditPhase}
+              />
+            )}
+
+            {phaseCode === "COMBAT" && (
+              <CombatPanel
+                gameId={gameId}
+                round={game.round}
+                nationKey={normalizeNationKey(currentNation)}
+                phaseStatus={currentStatus}
+                canEdit={canEditPhase}
+              />
+            )}
+
+            {phaseCode === "REFIT_DEPLOY" && (
+              <RefitDeployPanel
+                gameId={gameId}
+                round={game.round}
+                nationKey={normalizeNationKey(currentNation)}
+                phaseStatus={currentStatus}
+                canEdit={canEditPhase}
+              />
+            )}
+
+            {phaseCode === "MORALE" && (
+              <MoralePanel
+                gameId={gameId}
+                round={game.round}
+                nationKey={normalizeNationKey(currentNation)}
+                phaseStatus={currentStatus}
+                canEdit={canEditPhase}
+              />
+            )}
+
+            {phaseCode === "PRODUCTION" && (
+              <ProductionPanel
+                gameId={gameId}
+                round={game.round}
+                nationKey={normalizeNationKey(currentNation)}
+                phaseStatus={currentStatus}
+                canEdit={canEditPhase}
+              />
+            )}
+
+            {!(["ECONOMY", "MOVEMENT", "COMBAT", "REFIT_DEPLOY", "MORALE", "PRODUCTION"].includes(phaseCode) || isStrategicPlanning) && (
+              <PhaseWorkbench phase={game?.phase} round={game?.round} actingNation={currentNation} />
+            )}
           </div>
         ) : (
           <PhaseWorkbench phase={game?.phase} round={game?.round} actingNation={currentNation} />
