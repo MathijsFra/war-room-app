@@ -46,25 +46,33 @@ function FlagPill({
   src,
   alt,
   isActive,
+  onClick,
 }: {
   src: string;
   alt: string;
   isActive: boolean;
+  onClick?: () => void;
 }) {
   return (
-    <div
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!onClick}
+      aria-label={alt}
+      aria-pressed={isActive}
       className={[
         "flex items-center justify-center rounded-md border transition",
+        onClick ? "cursor-pointer" : "cursor-default opacity-80",
         isActive
           ? "border-amber-400/60 shadow-[0_0_10px_rgba(251,191,36,0.45)]"
-          : "border-white/20",
+          : "border-white/20 hover:border-white/35",
       ].join(" ")}
       style={{
         width: "44px",
         height: "28px",
         backgroundColor: "#1f1f1f",
       }}
-      title={alt}
+      title={onClick ? `Act as ${alt}` : alt}
     >
       <img
         src={src}
@@ -77,7 +85,7 @@ function FlagPill({
           display: "block",
         }}
       />
-    </div>
+    </button>
   );
 }
 
@@ -148,30 +156,34 @@ export default function CommanderPanel({
                 src={item.src}
                 alt={item.alt}
                 isActive={isActive}
+                onClick={
+                  sorted.length > 1
+                    ? () => {
+                        onChangeNation(item.raw);
+                      }
+                    : undefined
+                }
               />
             );
           })
         )}
       </div>
 
-      {sorted.length > 1 ? (
-        <select
-          className="rounded-xl border border-white/10 bg-zinc-950/60 px-3 py-2 text-xs text-zinc-200"
-          value={effectiveCurrent ?? ""}
-          onChange={(e) => onChangeNation(e.target.value)}
-          title="Current nation (your actions are issued as this nation)"
-        >
-          {sorted.map((n) => (
-            <option key={n} value={n}>
-              Acting as: {n}
-            </option>
-          ))}
-        </select>
-      ) : (
-        <span className="rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
-          Acting as: {sorted[0] ?? "—"}
-        </span>
-      )}
+      <span
+        className={[
+          "rounded-xl border px-3 py-2 text-xs",
+          sorted.length > 1
+            ? "border-white/10 bg-white/5 text-zinc-200"
+            : "border-amber-400/25 bg-amber-400/10 text-amber-200",
+        ].join(" ")}
+        title={
+          sorted.length > 1
+            ? "Click a flag to change the nation you are acting as"
+            : "You control a single nation"
+        }
+      >
+        Acting as: {effectiveCurrent ?? "—"}
+      </span>
     </div>
   );
 }
