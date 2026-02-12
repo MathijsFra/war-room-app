@@ -192,6 +192,7 @@ export default function GamePage() {
       .channel(`rt:game:${gameId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "games", filter: `id=eq.${gameId}` }, refreshGame)
       .on("postgres_changes", { event: "*", schema: "public", table: "players", filter: `game_id=eq.${gameId}` }, refreshGame)
+      .on("postgres_changes", { event: "*", schema: "public", table: "nations", filter: `game_id=eq.${gameId}` }, refreshGame)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "player_nations", filter: `game_id=eq.${gameId}` },
@@ -199,7 +200,17 @@ export default function GamePage() {
       )
       .on(
         "postgres_changes",
+        { event: "*", schema: "public", table: "regions" },
+        refreshGame
+      )
+      .on(
+        "postgres_changes",
         { event: "*", schema: "public", table: "nation_phase_state", filter: `game_id=eq.${gameId}` },
+        refreshGame
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "game_log", filter: `game_id=eq.${gameId}` },
         refreshGame
       )
       .on(
@@ -389,6 +400,8 @@ export default function GamePage() {
                 nationKey={normalizeNationKey(currentNation)}
                 phaseStatus={currentStatus}
                 canEdit={canEditPhase}
+                isHost={isHost}
+                onError={(m) => setError(m)}
               />
             )}
 
