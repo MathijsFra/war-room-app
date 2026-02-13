@@ -69,6 +69,22 @@ export default function MovementPanel(props: {
     return map;
   }, [stacks]);
 
+  const commandLocation = useMemo(() => {
+    // Best-effort: most commands should be in a single region at a time.
+    // If a command has stacks in multiple regions (should be rare / transitional),
+    // we keep per-stack territory labels to avoid hiding important info.
+    const loc: Record<string, { primary: string | null; isMulti: boolean }> = {};
+    for (const c of commands) {
+      const ss = stacksByCommand[c.id] ?? [];
+      const codes = Array.from(new Set(ss.map((s) => s.territory_code)));
+      loc[c.id] = {
+        primary: codes.length === 1 ? codes[0] : codes.length > 1 ? codes[0] : null,
+        isMulti: codes.length > 1,
+      };
+    }
+    return loc;
+  }, [commands, stacksByCommand]);
+
   return (
     <PhaseShell
       title="Phase 3: Movement Operations"
@@ -125,7 +141,12 @@ export default function MovementPanel(props: {
             {commands.map((c) => (
               <div key={c.id} className="rounded-xl border border-white/10 bg-black/20 p-4">
                 <div className="flex items-start justify-between gap-3">
-                  <div className="text-sm font-semibold text-zinc-100">{c.command_name}</div>
+                  <div className="text-sm font-semibold text-zinc-100">
+                    <span className="mr-2 inline-flex items-center rounded-md border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-[11px] text-zinc-200">
+                      {commandLocation[c.id]?.isMulti ? "MULTI" : commandLocation[c.id]?.primary ?? "—"}
+                    </span>
+                    {c.command_name}
+                  </div>
                   <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] tracking-wide text-zinc-200">
                     {c.command_type}
                   </span>
@@ -134,8 +155,12 @@ export default function MovementPanel(props: {
                   {(stacksByCommand[c.id] ?? []).map((s) => (
                     <div key={s.id} className="flex items-center justify-between text-xs">
                       <div className="text-zinc-300">
-                        <span className="font-mono text-zinc-200">{s.territory_code}</span>
-                        <span className="mx-2 text-zinc-600">•</span>
+                        {commandLocation[c.id]?.isMulti && (
+                          <>
+                            <span className="font-mono text-zinc-200">{s.territory_code}</span>
+                            <span className="mx-2 text-zinc-600">•</span>
+                          </>
+                        )}
                         {s.unit_type}
                       </div>
                       <div className="font-semibold text-zinc-100">{s.unit_count}</div>
