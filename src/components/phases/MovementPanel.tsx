@@ -1,5 +1,8 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabase/client";
+import { getForcesInPlay } from "@/lib/db/units";
 import PhaseShell from "@/components/phases/PhaseShell";
 
 export default function MovementPanel(props: {
@@ -10,6 +13,61 @@ export default function MovementPanel(props: {
   canEdit: boolean;
 }) {
   const { round, nationKey, phaseStatus, canEdit } = props;
+
+  const [nationId, setNationId] = useState<string | null>(null);
+  const [commands, setCommands] = useState<Array<{ id: string; command_type: "LAND" | "AIR" | "NAVAL"; command_name: string }>>([]);
+  const [stacks, setStacks] = useState<Array<{ id: string; territory_code: string; unit_type: string; unit_count: number; command_id: string }>>([]);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    async function run() {
+      setLoadErr(null);
+      setLoading(true);
+      try {
+        const { data: nRow, error: nErr } = await supabase
+          .from("nations")
+          .select("id")
+          .eq("game_id", props.gameId)
+          .eq("nation_key", nationKey)
+          .maybeSingle();
+        if (nErr) throw new Error(nErr.message);
+        if (!nRow?.id) {
+          if (!alive) return;
+          setNationId(null);
+          setCommands([]);
+          setStacks([]);
+          return;
+        }
+        if (!alive) return;
+        setNationId(nRow.id);
+        const forces = await getForcesInPlay(props.gameId, nRow.id);
+        if (!alive) return;
+        setCommands(forces.commands);
+        setStacks(forces.stacks);
+      } catch (e) {
+        if (!alive) return;
+        setLoadErr(e instanceof Error ? e.message : "Failed to load forces");
+      } finally {
+        if (!alive) return;
+        setLoading(false);
+      }
+    }
+    run();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.gameId, nationKey]);
+
+  const stacksByCommand = useMemo(() => {
+    const map: Record<string, typeof stacks> = {};
+    for (const s of stacks) {
+      (map[s.command_id] ??= []).push(s);
+    }
+    return map;
+  }, [stacks]);
 
   return (
     <PhaseShell
@@ -34,6 +92,62 @@ export default function MovementPanel(props: {
             <li>Pinning detection and hotspot creation.</li>
             <li>Naval movement, sea transport, convoy raid declaration.</li>
           </ul>
+        </div>
+
+        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-zinc-100">Forces in play</div>
+              <div className="mt-1 text-xs text-zinc-400">
+                Seeded from the scenario deployment. Commands are backed by named command markers.
+              </div>
+            </div>
+            <div className="text-xs text-zinc-400">
+              {loading ? "Loading…" : nationId ? `${commands.length} commands` : "—"}
+            </div>
+          </div>
+
+          {loadErr && (
+            <div className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-200">
+              {loadErr}
+            </div>
+          )}
+
+          {!loadErr && !loading && commands.length === 0 && (
+            <div className="mt-3 text-xs text-zinc-400">
+              No commands found for this nation. If you just installed unit seeding, make sure you ran
+              <code className="mx-1 rounded bg-black/30 px-1.5 py-0.5">sql/seed_game_units.sql</code>
+              in Supabase, then start a new game.
+            </div>
+          )}
+
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+            {commands.map((c) => (
+              <div key={c.id} className="rounded-xl border border-white/10 bg-black/20 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="text-sm font-semibold text-zinc-100">{c.command_name}</div>
+                  <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] tracking-wide text-zinc-200">
+                    {c.command_type}
+                  </span>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {(stacksByCommand[c.id] ?? []).map((s) => (
+                    <div key={s.id} className="flex items-center justify-between text-xs">
+                      <div className="text-zinc-300">
+                        <span className="font-mono text-zinc-200">{s.territory_code}</span>
+                        <span className="mx-2 text-zinc-600">•</span>
+                        {s.unit_type}
+                      </div>
+                      <div className="font-semibold text-zinc-100">{s.unit_count}</div>
+                    </div>
+                  ))}
+                  {(stacksByCommand[c.id] ?? []).length === 0 && (
+                    <div className="text-xs text-zinc-500">No unit stacks in this command.</div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

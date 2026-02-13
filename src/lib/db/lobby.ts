@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase/client";
+import { seedGameUnits } from "@/lib/db/units";
 
 export type GameStatus = "LOBBY" | "ACTIVE" | "FINISHED";
 export type GamePhase =
@@ -174,6 +175,10 @@ export async function startGame(gameId: string) {
     .eq("id", gameId);
 
   if (error) throw new Error(error.message);
+
+  // Seed marker pool + starting commands + starting unit stacks.
+  // (Requires installing sql/seed_game_units.sql in Supabase.)
+  await seedGameUnits(gameId);
 }
 
 export async function advancePhase(gameId: string) {
